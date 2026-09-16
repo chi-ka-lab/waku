@@ -7,7 +7,38 @@
 - **データは端末の中だけ**（localStorage）。請求データが外部に出ません
 - **スマホ対応**（ボトムナビ＋FAB、ホーム画面に追加可）
 
-## 起動
+## 公開URL
+
+**https://chi-ka-lab.github.io/waku/**
+
+- スマホでもこのURLを開けば **Google連携が使えます**（HTTPSのため）
+- 共有メニュー →「**ホーム画面に追加**」でアプリとして起動できます（オフライン動作）
+- 更新は `./deploy.sh` を実行するだけ（1分ほどで反映）
+
+> リポジトリは public ですが、**あなたのデータは1件も入っていません**。
+> 入っているのはアプリのコードと匿名のサンプル枠（クライアントA/B/C）だけです。
+> 実データはブラウザの localStorage と、あなたの Google ドライブにあります。
+
+## 端末間の同期（Google ドライブ）
+
+**データはブラウザごとに別です。**PCで入れた実績はスマホには出てきません。
+これを揃えるのが Google ドライブ同期です。
+
+- 保存先は **あなたの Google ドライブの appDataFolder**（アプリ専用の隠し領域）
+  他のアプリからは見えず、ドライブ画面にも出ません。**サーバーは介在しません**
+- 設定 →「端末間の同期」→「**いま同期する**」
+- **自動で同期**をONにすると、変更の20秒後とタブを閉じるときに自動送信
+- 別の端末で更新されていたら**選択ダイアログ**が出ます
+
+| 選択肢 | 動き |
+|---|---|
+| この端末を送る | ローカルでクラウドを上書き |
+| クラウドを取り込む | クラウドでローカルを上書き |
+| **統合する（推奨）** | タスク・実績・確定・学習内容を **id で足し合わせ**、枠や設定は新しい方を採用 |
+
+**適用の直前に必ず自動バックアップを取ります。**「直前の状態に戻す」でいつでも戻せます。
+
+## ローカルで起動（開発用）
 
 ```bash
 ./serve.sh          # → http://localhost:8765
@@ -95,7 +126,7 @@ Google カレンダー → 設定 → **インポート** で読み込みます�
 | Googleに出るメッセージ | 原因 | 直し方 |
 |---|---|---|
 | アクセスをブロック：…審査プロセスを完了していません<br>`403: access_denied` | テストユーザー未追加 | [対象ユーザー](https://console.cloud.google.com/auth/audience) → テストユーザー → **＋ Add users** にログイン用の Gmail を追加 → 1〜2分待って再接続 |
-| `400: origin_mismatch` / `invalid_client` | JavaScript生成元の不一致 | [クライアント設定](https://console.cloud.google.com/auth/clients) の「承認済みのJavaScript生成元」に `http://localhost:8765`（末尾スラッシュなし） |
+| `400: origin_mismatch` / `invalid_client` | JavaScript生成元の不一致 | [クライアント設定](https://console.cloud.google.com/auth/clients) の「承認済みのJavaScript生成元」に `https://chi-ka-lab.github.io` と `http://localhost:8765` を追加（末尾スラッシュなし） |
 | `Calendar API has not been used…` | API未有効 | [Calendar API](https://console.cloud.google.com/apis/library/calendar-json.googleapis.com) を有効にする |
 | 認証ウィンドウが開かない | ポップアップブロック | ブラウザでこのサイトのポップアップを許可 |
 
@@ -138,8 +169,8 @@ Google カレンダー → 設定 → **インポート** で読み込みます�
 - 辞退した予定・終日予定・キャンセル済みは最初から対象外
 - 確保ブロックの再送は**更新**なので、Google側に重複が作られない
 
-> **制約**：Google は `http://localhost` 以外のHTTP接続を認証に使えません。
-> **スマホ（LANのIP）からはAPI連携は使えません**。スマホでは .ics 書き出しを使ってください。
+> **HTTPSなら制約はありません。**公開URL（https://chi-ka-lab.github.io/waku/）なら
+> スマホでもAPI連携が使えます。制約が出るのは `http://` のLAN IPで開いたときだけです。
 > アクセストークンは**保存していません**（タブを閉じると切断）。端末に残るのはクライアントIDのみです。
 
 ## 提出用CSV（クライアントごと）

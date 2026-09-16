@@ -4,6 +4,11 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#FFF7EC">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="枠">
+<meta name="description" content="タスクを忘れず、稼働時間を確保するための1人用アプリ">
+<link rel="manifest" href="manifest.webmanifest">
 <title>枠 WAKU</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%23FF8A1F'/><rect x='8' y='8' width='16' height='16' rx='3.5' fill='none' stroke='%23fff' stroke-width='3'/></svg>">
 <style>
@@ -1738,6 +1743,8 @@ on('dWipe',()=>{if(!confirm('本当に全部消しますか？ 元に戻せま�
   S=blank();save();toast('消しました');renderAll();});
 
 /* ═══════════════ init ═══════════════ */
+if('serviceWorker' in navigator && location.protocol==='https:')
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
 (function init(){
   if(location.protocol==='file:')document.getElementById('fileBanner').hidden=false;
   if(!load()){S=blank();seed();}
