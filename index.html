@@ -660,6 +660,29 @@ input[type=text],input[type=number],input[type=date],select,textarea{border-radi
     <div id="gDiag" style="margin-top:12px"></div>
   </div>
 
+  <div class="sect"><h3>カレンダーファイル（.ics）から読み込む</h3>
+    <span class="hint">Google の設定は不要。ファイルを選ぶだけで予定が重なって表示されます</span></div>
+  <div class="card pad">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:11px">
+      <button class="solid" id="icsPick" style="background:var(--blue);color:#fff;box-shadow:none">.ics ファイルを選ぶ</button>
+      <button class="ghost" id="icsClear">読み込んだ予定を消す</button>
+      <input type="file" id="icsFile" accept=".ics,text/calendar" hidden>
+    </div>
+    <div class="sub" id="icsState">まだ読み込んでいません</div>
+    <details style="margin-top:11px">
+      <summary style="cursor:pointer;font-size:12.5px;color:var(--gold);font-weight:700">Google カレンダーから .ics を取り出す手順</summary>
+      <ol style="font-size:12.5px;color:var(--dim);line-height:1.9;margin:10px 0 0 18px">
+        <li><a href="https://calendar.google.com/calendar/u/0/r/settings/export" target="_blank" rel="noopener"
+          style="color:var(--gold);font-weight:700">Google カレンダーのエクスポート画面を開く ↗</a></li>
+        <li>「<b>エクスポート</b>」を押すと zip がダウンロードされます</li>
+        <li>zip をダブルクリックで展開 → 中の <code>〜.ics</code> を上のボタンで選ぶ</li>
+      </ol>
+      <p style="font-size:12px;color:var(--faint);margin-top:9px;line-height:1.8">
+        読み込んだ予定は<b>この端末の中だけ</b>に保存されます。繰り返し予定（毎日・毎週・毎月）も展開されます。
+        終日予定は対象外です。</p>
+    </details>
+  </div>
+
   <div class="sect"><h3>端末間の同期（Google ドライブ）</h3>
     <span class="hint">あなたの Google ドライブの専用領域に保存。他のアプリからは見えません</span></div>
   <div class="card pad">
@@ -722,7 +745,7 @@ function blank(){return{v:1,
   settings:{avail:[0,6.5,6.5,6.5,6.5,5,0], ws:540, we:1140, reserve:60, theme:'light',
             gcid:'', gcal:'primary', gcals:null, me:'', org:'', showG:true, autoSync:true},
   envs:[],budgets:{},tpls:[],tasks:[],entries:[],closes:[],gen:{},timer:null,gimp:[],gcache:null,gmap:[],
-  meta:{dev:'',rev:0,at:0},sync:null};}
+  meta:{dev:'',rev:0,at:0},sync:null,ics:null};}
 
 function load(){
   try{const raw=localStorage.getItem(KEY); if(raw){S=JSON.parse(raw); migrate(); return true;}}
@@ -802,8 +825,12 @@ const liveEnvs=()=>S.envs.filter(e=>!e.arch);
 function bud(m){return S.budgets[m]||(S.budgets[m]={});}
 /* Google 予定キャッシュ（読み取り専用の重ね表示用） */
 function gEventsOn(d){
-  if(!S.gcache||!S.settings.showG)return[];
-  return (S.gcache.items||[]).filter(x=>x.date===d);
+  if(!S.settings.showG)return[];
+  const a=(S.gcache&&S.gcache.items||[]).filter(x=>x.date===d);
+  const b=(S.ics&&S.ics.items||[]).filter(x=>x.date===d);
+  if(!b.length)return a;
+  const imp=new Set(S.gimp||[]);
+  return a.concat(b.map(x=>Object.assign({},x,{taken:imp.has(x.id)})));
 }
 function budOf(m,id){const b=bud(m)[id];return b?(b.p||0)+(b.c||0):0;}
 function monthEnvs(m){const b=bud(m);return S.envs.filter(e=>b[e.id]!==undefined&&!e.arch);}
@@ -1382,6 +1409,7 @@ function renderSet(){
     : (S.settings.gcid?'未接続（「接続する」を押してください）':'クライアントID 未設定 ──「セットアップ手順」から進めてください');
   renderDiag();
   if(typeof renderSetSync==='function')renderSetSync();
+  if(typeof renderIcs==='function')renderIcs();
 }
 
 /* ═══════════════ render: all ═══════════════ */
@@ -2091,22 +2119,29 @@ function quickImport(it){
     onMount:r=>r.addEventListener('click',ev=>{
       const b=ev.target.closest('[data-q]');if(!b)return;
       const a=b.dataset.q;
-      if(a==='hide'){S.gimp=(S.gimp||[]).concat(it.id);
-        S.gcache.items=S.gcache.items.filter(x=>x.id!==it.id);save();closeModal();renderAll();return;}
+      if(a==='hide'){forgetEvent(it.id);save();closeModal();renderAll();return;}
       if(a==='take'){
         const v=r.querySelector('#qiEnv').value;
         if(!v){toast('枠を選んでください','er');return;}
         const t=mkTask({env:v,title:it.title,est:r2(Math.max(0.25,(it.e-it.s)/60)),date:it.date,start:it.s,src:'gcal'});
         t.st='done';
         S.entries.push({id:uid(),task:t.id,env:v,date:it.date,h:r2(Math.max(0,(it.e-it.s)/60)),s:it.s,e:it.e,br:0,at:Date.now()});
-        learnMap(it.title,v);S.gimp=(S.gimp||[]).concat(it.id);
-        S.gcache.items=S.gcache.items.filter(x=>x.id!==it.id);
+        learnMap(it.title,v);forgetEvent(it.id);
         save();closeModal();renderAll();confetti(14);toast('実績として取り込みました','ok');return;}
       closeModal();})});
 }
+function findEvent(id){
+  return ((S.gcache&&S.gcache.items)||[]).find(x=>x.id===id)
+      || ((S.ics&&S.ics.items)||[]).find(x=>x.id===id) || null;
+}
+function forgetEvent(id){
+  S.gimp=(S.gimp||[]).concat(id);
+  if(S.gcache&&S.gcache.items)S.gcache.items=S.gcache.items.filter(x=>x.id!==id);
+  if(S.ics&&S.ics.items)S.ics.items=S.ics.items.filter(x=>x.id!==id);
+}
 document.addEventListener('click',ev=>{
   const g=ev.target.closest('.blk.g[data-gid]');if(!g)return;
-  const it=((S.gcache||{}).items||[]).find(x=>x.id===g.dataset.gid);
+  const it=findEvent(g.dataset.gid);
   if(it)quickImport(it);
 });
 function importModal(items){
@@ -2671,6 +2706,132 @@ on('dvRestore',()=>{
 document.getElementById('p-set').addEventListener('change',e=>{
   if(e.target.id==='dvAuto'){S.settings.autoSync=e.target.checked;save();
     if(e.target.checked&&GCAL.token)drivePush(true).catch(()=>{});}
+});
+</script>
+
+<script>
+/* ═══════════════ .ics 読み込み（Google設定不要） ═══════════════ */
+function icsUnfold(t){return String(t).replace(/\r\n/g,'\n').replace(/\r/g,'\n').replace(/\n[ \t]/g,'');}
+function icsText(v){return String(v).replace(/\\n/gi,' ').replace(/\\,/g,',').replace(/\;/g,';').replace(/\\\\/g,'\\').trim();}
+function icsWhen(val,params){
+  const v=String(val).trim();
+  let m=v.match(/^(\d{4})(\d{2})(\d{2})$/);
+  if(m)return{allDay:true,d:new Date(+m[1],+m[2]-1,+m[3])};
+  m=v.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})(Z)?$/);
+  if(!m)return null;
+  if(m[7]==='Z')return{allDay:false,d:new Date(Date.UTC(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6]))};
+  /* TZID 付き/なしのフローティング時刻は、端末のタイムゾーンとして扱う（実用上ほぼ一致） */
+  return{allDay:false,d:new Date(+m[1],+m[2]-1,+m[3],+m[4],+m[5],+m[6])};
+}
+const WD={SU:0,MO:1,TU:2,WE:3,TH:4,FR:5,SA:6};
+function icsExpand(ev,out,from,to){
+  if(!ev.s||ev.s.allDay)return;
+  if((ev.status||'').toUpperCase()==='CANCELLED')return;
+  const dur=ev.e&&!ev.e.allDay?Math.max(300000,ev.e.d-ev.s.d):3600000;
+  const limit=D(to), seen=new Set();
+  const ex=new Set((ev.ex||[]).map(x=>iso(x.d)));
+  const push=d0=>{
+    const ds=iso(d0); if(ds<from||ds>to||ex.has(ds))return;
+    const d1=new Date(d0.getTime()+dur);
+    const key=ds+'|'+d0.getHours()+':'+d0.getMinutes()+'|'+(ev.title||'');
+    if(seen.has(key))return; seen.add(key);
+    out.push({id:'ics:'+key, title:ev.title||'(無題)', date:ds,
+      s:d0.getHours()*60+d0.getMinutes(),
+      e:iso(d1)===ds?(d1.getHours()*60+d1.getMinutes()):1439});
+  };
+  if(!ev.rrule){push(ev.s.d);return;}
+  const R={}; String(ev.rrule).split(';').forEach(p=>{const i=p.indexOf('=');if(i>0)R[p.slice(0,i).toUpperCase()]=p.slice(i+1);});
+  const freq=(R.FREQ||'').toUpperCase(), iv=Math.max(1,Number(R.INTERVAL||1));
+  const until=R.UNTIL?(icsWhen(R.UNTIL,{})||{}).d:null;
+  const count=R.COUNT?Number(R.COUNT):null;
+  const byday=(R.BYDAY||'').split(',').filter(Boolean)
+    .map(x=>WD[x.slice(-2).toUpperCase()]).filter(x=>x!==undefined);
+  let n=0,guard=0;
+  if(freq==='WEEKLY'&&byday.length){
+    const wk=new Date(ev.s.d); wk.setDate(wk.getDate()-((wk.getDay()+6)%7)); wk.setHours(0,0,0,0);
+    while(wk<=limit&&guard++<1000){
+      for(const w of byday){
+        const d0=new Date(wk); d0.setDate(wk.getDate()+((w+6)%7));
+        d0.setHours(ev.s.d.getHours(),ev.s.d.getMinutes(),0,0);
+        if(d0<ev.s.d)continue;
+        if(until&&d0>until)continue;
+        if(count&&n>=count)return;
+        push(d0); n++;
+      }
+      wk.setDate(wk.getDate()+7*iv);
+    }
+    return;
+  }
+  const cur=new Date(ev.s.d);
+  while(cur<=limit&&guard++<1000){
+    if(until&&cur>until)break;
+    if(count&&n>=count)break;
+    push(new Date(cur)); n++;
+    if(freq==='DAILY')cur.setDate(cur.getDate()+iv);
+    else if(freq==='WEEKLY')cur.setDate(cur.getDate()+7*iv);
+    else if(freq==='MONTHLY')cur.setMonth(cur.getMonth()+iv);
+    else if(freq==='YEARLY')cur.setFullYear(cur.getFullYear()+iv);
+    else break;
+  }
+}
+function icsParse(text,from,to){
+  const lines=icsUnfold(text).split('\n');
+  const out=[]; let cur=null;
+  for(const raw of lines){
+    const ln=raw.trim();
+    if(/^BEGIN:VEVENT$/i.test(ln)){cur={};continue;}
+    if(/^END:VEVENT$/i.test(ln)){if(cur)icsExpand(cur,out,from,to);cur=null;continue;}
+    if(!cur)continue;
+    const i=ln.indexOf(':'); if(i<0)continue;
+    const key=ln.slice(0,i), val=ln.slice(i+1);
+    const parts=key.split(';'), name=parts[0].toUpperCase(), params={};
+    parts.slice(1).forEach(p=>{const j=p.indexOf('=');if(j>0)params[p.slice(0,j).toUpperCase()]=p.slice(j+1);});
+    if(name==='DTSTART')cur.s=icsWhen(val,params);
+    else if(name==='DTEND')cur.e=icsWhen(val,params);
+    else if(name==='SUMMARY')cur.title=icsText(val);
+    else if(name==='UID')cur.uid=val;
+    else if(name==='RRULE')cur.rrule=val;
+    else if(name==='STATUS')cur.status=val;
+    else if(name==='EXDATE')cur.ex=(cur.ex||[]).concat(
+      val.split(',').map(v=>icsWhen(v,params)).filter(Boolean));
+  }
+  out.sort((a,b)=>a.date<b.date?-1:a.date>b.date?1:a.s-b.s);
+  return out;
+}
+function icsRange(){
+  return{from:addDays(today(),-62), to:addDays(today(),150)};
+}
+function icsLoadText(text,name){
+  const r=icsRange();
+  const items=icsParse(text,r.from,r.to);
+  if(!items.length)throw new Error('予定を1件も読み取れませんでした（終日のみ、または期間外かもしれません）');
+  S.ics={name:name||'calendar.ics',at:Date.now(),from:r.from,to:r.to,items};
+  save();renderAll();renderIcs();
+  confetti(26);
+  toast(`${items.length}件の予定を読み込みました（${r.from} 〜 ${r.to}）`,'ok');
+  return items.length;
+}
+function renderIcs(){
+  const el=document.getElementById('icsState'); if(!el)return;
+  if(!S.ics||!S.ics.items||!S.ics.items.length){el.textContent='まだ読み込んでいません';return;}
+  const days=new Set(S.ics.items.map(x=>x.date));
+  el.innerHTML=`<span style="color:var(--ok);font-weight:700">${S.ics.items.length}件</span> 読み込み済み`+
+    ` ── ${esc(S.ics.name)} ・ ${days.size}日ぶん ・ ${new Date(S.ics.at).toLocaleString('ja-JP')}`+
+    `<br>週・今日の画面に、破線のブロックで重なって表示されます。クリックすると実績に取り込めます。`;
+}
+on('icsPick',()=>document.getElementById('icsFile').click());
+on('icsFile',e=>{
+  const f=e.target.files[0]; if(!f)return;
+  const rd=new FileReader();
+  rd.onload=()=>{try{icsLoadText(String(rd.result),f.name);}
+    catch(err){toast(err.message||'読み込めませんでした','er');}};
+  rd.onerror=()=>toast('ファイルを読めませんでした','er');
+  rd.readAsText(f,'utf-8'); e.target.value='';
+},'change');
+on('icsClear',()=>{
+  if(!S.ics){toast('読み込んだ予定はありません');return;}
+  if(!confirm('読み込んだカレンダーの予定を消しますか？（実績として取り込んだものは残ります）'))return;
+  S.ics=null;save();renderAll();renderIcs();toast('消しました');
 });
 </script>
 </body></html>
