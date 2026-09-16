@@ -1720,7 +1720,8 @@ document.getElementById('p-set').addEventListener('change',e=>{
   if(e.target.id==='setWs'){const v=parseT(e.target.value);if(v!=null)S.settings.ws=v;save();renderSet();}
   if(e.target.id==='setWe'){const v=parseT(e.target.value);if(v!=null)S.settings.we=v;save();renderSet();}
   if(e.target.id==='setRes'){S.settings.reserve=Math.max(0,Number(e.target.value)||0);save();}
-  if(e.target.id==='gCid'){S.settings.gcid=e.target.value.trim();save();renderSet();}
+  if(e.target.id==='gCid'){S.settings.gcid=e.target.value.trim();save();
+    GCAL.tc=null;if(S.settings.gcid)gPrepare().then(renderSet).catch(()=>renderSet());else renderSet();}
   if(e.target.id==='gCal'){S.settings.gcal=e.target.value;save();S.gcache=null;maybeSync(weekDays(ui.week),true);}
   if(e.target.id==='gShow'){S.settings.showG=e.target.checked;save();renderAll();}
   if(e.target.id==='setMe'){S.settings.me=e.target.value.trim();save();}
@@ -1767,6 +1768,8 @@ if('serviceWorker' in navigator && location.protocol==='https:')
   if(location.protocol==='file:')document.getElementById('fileBanner').hidden=false;
   if(!load()){S=blank();seed();}
   setTheme(S.settings.theme||'light');
+  if(S.settings.gcid&&typeof gPrepare==='function')
+    setTimeout(()=>gPrepare().then(()=>{if(ui.panel==='set')renderSet();}).catch(()=>{}),200);
   if(typeof loadTok==='function'&&loadTok()){
     setTimeout(()=>{ maybeSync(weekDays(ui.day));
       if(S.settings.autoSync&&typeof driveSync==='function')
@@ -1894,7 +1897,7 @@ function exportICS(days,label){
 }
 
 /* ═══════════════ Google カレンダー ═══════════════ */
-var GCAL={token:null,exp:0};
+var GCAL={token:null,exp:0,tc:null,cid:'',ready:false,loading:null,pending:null,wd:null,step:'未開始',err:''};
 const TKEY='waku.gtok';
 function saveTok(){try{
   if(GCAL.token&&GCAL.exp>Date.now())localStorage.setItem(TKEY,JSON.stringify({t:GCAL.token,e:GCAL.exp}));
@@ -1909,27 +1912,76 @@ function gDisconnect(){GCAL.token=null;GCAL.exp=0;saveTok();S.gcache=null;
 const TZ=()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Tokyo'}catch(_){return 'Asia/Tokyo'}};
 function gDT(date,min){const p=n=>String(n).padStart(2,'0');
   return `${date}T${p(Math.floor(min/60)%24)}:${p(min%60)}:00`;}
-function gLoad(){return new Promise((res,rej)=>{
-  if(window.google&&window.google.accounts&&window.google.accounts.oauth2)return res();
-  const el=document.createElement('script');el.src='https://accounts.google.com/gsi/client';el.async=true;
-  el.onload=()=>res();el.onerror=()=>rej(new Error('Googleのスクリプトを読み込めませんでした（オフライン？）'));
-  document.head.appendChild(el);});}
+const GSCOPES='https://www.googleapis.com/auth/calendar.events '+
+  'https://www.googleapis.com/auth/calendar.readonly '+
+  'https://www.googleapis.com/auth/drive.appdata';
+function gStep(st,err){GCAL.step=st||GCAL.step;if(err!==undefined)GCAL.err=err;
+  if(typeof renderDiag==='function'&&ui.panel==='set')renderDiag();}
+function gLoad(){
+  if(window.google&&window.google.accounts&&window.google.accounts.oauth2)return Promise.resolve();
+  if(GCAL.loading)return GCAL.loading;
+  GCAL.loading=new Promise((res,rej)=>{
+    const el=document.createElement('script');el.src='https://accounts.google.com/gsi/client';el.async=true;
+    el.onload=()=>{gStep('Googleスクリプト 読み込み済み','');res();};
+    el.onerror=()=>{GCAL.loading=null;gStep('Googleスクリプト 読み込み失敗','ネットワークかブロッカーで accounts.google.com に到達できません');
+      rej(new Error('Googleのスクリプトを読み込めませんでした（オフライン／広告ブロッカー？）'));};
+    document.head.appendChild(el);});
+  return GCAL.loading;
+}
+function gSettle(ok,val){
+  clearTimeout(GCAL.wd);
+  const p=GCAL.pending;GCAL.pending=null;
+  if(!p)return; ok?p.res(val):p.rej(val);
+}
+/* クリック前に済ませておく準備。ここが終わっていれば requestAccessToken を同期で呼べる */
+async function gPrepare(){
+  const cid=(S.settings.gcid||'').trim();
+  if(!cid)throw new Error('設定で OAuth クライアントID を入れてください');
+  await gLoad();
+  if(!GCAL.tc||GCAL.cid!==cid){
+    GCAL.cid=cid;
+    GCAL.tc=google.accounts.oauth2.initTokenClient({
+      client_id:cid, scope:GSCOPES,
+      callback:r=>{
+        if(r&&r.error){gStep('認証エラー','callback: '+r.error+(r.error_description?' / '+r.error_description:''));
+          gSettle(false,new Error('認証に失敗しました: '+r.error));return;}
+        GCAL.token=r.access_token;GCAL.exp=Date.now()+(Number(r.expires_in)||3600)*1000;
+        saveTok();gStep('接続成功','');
+        if(typeof renderSet==='function'&&ui.panel==='set')renderSet();
+        gSettle(true,GCAL.token);},
+      error_callback:er=>{
+        const ty=(er&&er.type)||'unknown';
+        gStep('認証中断','error_callback: '+ty);
+        gSettle(false,new Error(
+          ty==='popup_failed_to_open'?'認証ウィンドウを開けませんでした（popup_failed_to_open）':
+          ty==='popup_closed'?'認証ウィンドウが閉じられました（popup_closed）。Googleの画面に「アクセスをブロック」と出た場合は access_denied です':
+          '認証が中断されました（'+ty+'）'));}
+    });
+    gStep('トークンクライアント 準備完了','');
+  }
+  GCAL.ready=true;return GCAL.tc;
+}
+/* ★ユーザー操作の直後に「同期で」呼ぶこと。await を挟むとポップアップがブロックされる */
+function gRequest(force){
+  if(!GCAL.tc)return Promise.reject(new Error('準備が終わっていません。もう一度押してください'));
+  if(GCAL.pending)return Promise.reject(new Error('認証中です。開いているGoogleの画面を確認してください'));
+  return new Promise((res,rej)=>{
+    GCAL.pending={res,rej};
+    gStep('認証ウィンドウを開いています','');
+    GCAL.wd=setTimeout(()=>{
+      gStep('応答なし','120秒たっても応答がありません。ポップアップがブロックされた可能性があります');
+      gSettle(false,new Error('認証ウィンドウからの応答がありません。ポップアップのブロックを確認してください'));
+    },120000);
+    try{GCAL.tc.requestAccessToken({prompt:force?'consent':''});}
+    catch(e){gStep('要求に失敗',String(e&&e.message||e));gSettle(false,e);}
+  });
+}
 async function gAuth(force){
   const cid=(S.settings.gcid||'').trim();
   if(!cid)throw new Error('設定で OAuth クライアントID を入れてください');
   if(!force&&GCAL.token&&Date.now()<GCAL.exp-60000)return GCAL.token;
-  await gLoad();
-  return new Promise((res,rej)=>{
-    const tc=google.accounts.oauth2.initTokenClient({client_id:cid,
-      scope:'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata',
-      callback:r=>{if(r.error)return rej(new Error('認証に失敗しました: '+r.error));
-        GCAL.token=r.access_token;GCAL.exp=Date.now()+(Number(r.expires_in)||3600)*1000;saveTok();
-        renderSet&&ui.panel==='set'&&renderSet();res(GCAL.token);},
-      error_callback:er=>{const ty=(er&&er.type)||'';
-        rej(new Error(ty==='popup_closed'
-          ? '認証ウィンドウが閉じられました（popup_closed）。Googleの画面で「アクセスをブロック：…審査プロセスを完了していません」と出た場合は access_denied です'
-          : '認証が中断されました'+(ty?'（'+ty+'）':'')));}});
-    tc.requestAccessToken({prompt:force?'consent':''});});
+  if(!GCAL.tc)await gPrepare();
+  return gRequest(force);
 }
 async function gRaw(url,opt){
   const tk=await gAuth(false);
@@ -2110,10 +2162,32 @@ async function guard(fn,busyMsg){
     if(k&&gFixModal(k))return;
     toast(m,'er');}
 }
-on('gConnect',()=>guard(async()=>{await gAuth(true);renderSet();
-  await gSync(weekDays(ui.week),true);renderAll();
+function afterConnect(){
+  renderSet();confetti(22);
   toast('接続しました。週・今日に予定が重なって表示されます','ok');
-  if(typeof driveSync==='function')setTimeout(()=>guard(()=>driveSync()),600);}));
+  gSync(weekDays(ui.week),true).then(()=>renderAll()).catch(e=>console.warn(e.message));
+  if(typeof driveSync==='function')setTimeout(()=>guard(()=>driveSync()),800);
+}
+function connectFail(e){
+  renderSet();
+  if(/応答がありません|popup/i.test(e.message)){gFixModal('popup');return;}
+  const k=gKind(e.message);
+  if(k&&gFixModal(k))return;
+  toast(e.message,'er');
+}
+function connectNow(){
+  const cid=(S.settings.gcid||'').trim();
+  if(!cid){toast('先に OAuth クライアントID を入れてください','er');gWizard();return;}
+  if(!GCAL.tc){
+    gStep('準備中','');toast('Google の準備をしています…');
+    gPrepare().then(()=>{renderSet();toast('準備ができました。もう一度「接続する」を押してください','ok');})
+      .catch(e=>{toast(e.message,'er');renderSet();});
+    return;
+  }
+  /* ここは同期で呼ぶこと。await を挟むとポップアップがブロックされる */
+  gRequest(true).then(afterConnect).catch(connectFail);
+}
+on('gConnect',connectNow);
 on('gCals',()=>guard(async()=>{
   const r=await gFetch('/users/me/calendarList?minAccessRole=writer&maxResults=50');
   S.settings.gcals=(r.items||[]).map(c=>({id:c.id,summary:c.summary+(c.primary?'（メイン）':'')}));
@@ -2157,14 +2231,30 @@ function renderDiag(){
     {ok:/\.apps\.googleusercontent\.com$/.test(cid),
      t:'クライアントID',v:cid?cid.slice(0,22)+'…':'未入力',
      ng:'「…apps.googleusercontent.com」で終わる文字列を貼り付けてください'},
-    {ok:!!GCAL.token,t:'認証',v:GCAL.token?'接続中':'未接続',ng:'「接続する」を押して Google でログインしてください'},
+    {ok:!!(window.google&&window.google.accounts&&window.google.accounts.oauth2),
+     t:'Googleスクリプト',v:'読み込み済み',
+     ng:'accounts.google.com に到達できていません（オフライン／広告ブロッカー／プロキシ）'},
+    {ok:!!GCAL.tc,t:'認証の準備',v:'準備完了（押せば即ポップアップ）',
+     ng:'まだ準備中です。数秒待つか、クライアントIDを確認してください'},
+    {ok:!!GCAL.token,t:'認証',
+     v:GCAL.token?('接続中 ── '+new Date(GCAL.exp).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})+' まで'):'未接続',
+     ng:'「接続する」を押して Google でログインしてください'},
   ];
   el.innerHTML=`<div class="card" style="box-shadow:none;background:var(--surface2)">${items.map(i=>`
     <div class="rowline" style="grid-template-columns:22px 116px minmax(0,1fr)">
       <span style="font-size:14px;color:${i.ok?'var(--ok)':'var(--over)'}">${i.ok?'●':'○'}</span>
       <span class="sub" style="font-weight:700;color:var(--text)">${i.t}</span>
       <span class="sub" style="min-width:0;overflow:hidden;text-overflow:ellipsis">${i.ok?esc(i.v):esc(i.ng)}</span>
-    </div>`).join('')}</div>`;
+    </div>`).join('')}
+    <div class="rowline" style="grid-template-columns:22px 116px minmax(0,1fr)">
+      <span style="font-size:14px;color:var(--faint)">·</span>
+      <span class="sub" style="font-weight:700;color:var(--text)">最後の動き</span>
+      <span class="sub" style="min-width:0">${esc(GCAL.step||'—')}</span></div>
+    ${GCAL.err?`<div class="rowline" style="grid-template-columns:22px 116px minmax(0,1fr);background:var(--tOv)">
+      <span style="font-size:14px;color:var(--over)">!</span>
+      <span class="sub" style="font-weight:700;color:var(--over)">最後のエラー</span>
+      <span class="sub" style="min-width:0;color:var(--over);white-space:normal;line-height:1.6">${esc(GCAL.err)}</span></div>`:''}
+    </div>`;
 }
 function gWizard(){
   const o=ORIGIN();
@@ -2206,16 +2296,24 @@ function gWizard(){
         これは公開されても単体では使えない値です。カレンダーのデータもこの端末の中だけで処理されます。</div>`,
     foot:`<button class="ghost" data-w="x">閉じる</button>
           <button class="solid" data-w="save">保存して接続する</button>`,
-    onMount:r=>r.addEventListener('click',ev=>{
+    onMount:r=>{
+      const ci=r.querySelector('#wCid');
+      if(ci)ci.addEventListener('input',()=>{const v=ci.value.trim();
+        if(/\.apps\.googleusercontent\.com$/.test(v)&&S.settings.gcid!==v){
+          S.settings.gcid=v;save();GCAL.tc=null;gPrepare().catch(()=>{});}});
+      r.addEventListener('click',ev=>{
       const b=ev.target.closest('[data-w]');if(!b)return;
       if(b.dataset.w==='copy')return copyText(ORIGIN());
       if(b.dataset.w==='save'){
         const v=(r.querySelector('#wCid').value||'').trim();
         if(!/\.apps\.googleusercontent\.com$/.test(v)){toast('「…apps.googleusercontent.com」で終わるIDを貼り付けてください','er');return;}
-        S.settings.gcid=v;save();closeModal();renderSet();
-        guard(async()=>{await gAuth(true);renderSet();confetti(22);toast('Googleカレンダーに接続しました','ok');});
+        if(S.settings.gcid!==v){S.settings.gcid=v;save();GCAL.tc=null;}
+        closeModal();
+        if(GCAL.tc)gRequest(true).then(afterConnect).catch(connectFail);
+        else gPrepare().then(()=>{renderSet();
+          toast('準備ができました。「接続する」を押してください','ok');}).catch(er=>toast(er.message,'er'));
         return;}
-      closeModal();})});
+      closeModal();});}});
 }
 const GFIX={
  testuser:{
