@@ -300,8 +300,19 @@ kbd{font-family:var(--mono);font-size:10.5px;background:var(--raise);border:1px 
   .wk{min-width:660px;grid-template-columns:38px repeat(7,minmax(84px,1fr))}
   .wkcol{min-height:340px}
 
-  .rowline{grid-template-columns:16px 1fr 38px;row-gap:8px;padding:11px 13px}
-  .rowline .m-l{grid-column:2/4}
+  /* 設定・提出・取り込みの行は、モバイルでは折り返しレイアウトにする
+     （インラインの grid-template-columns を display:flex で無効化）*/
+  .rowline{display:flex !important;flex-wrap:wrap;gap:8px 9px;align-items:center;padding:13px}
+  .rowline>*{min-width:0}
+  .rowline>input[type=text]{flex:1 1 100%;width:auto}
+  .rowline>select{flex:1 1 42%;width:auto}
+  .rowline>input[type=number]{flex:0 0 84px;width:84px}
+  .rowline>input[type=date]{flex:1 1 100%;width:auto}
+  .rowline>label{flex:0 0 auto;font-size:12px}
+  .rowline>button{flex:0 0 auto}
+  .rowline>.swatch{flex:0 0 22px;width:22px;height:22px}
+  .rowline>b,.rowline>span{flex:0 1 auto}
+  .rowline>.m-l{flex:1 1 100%}
   .bar1{gap:10px}
   h2.tt{font-size:17px}
   .pad{padding:14px 15px}
@@ -398,9 +409,10 @@ input[type=text],input[type=number],input[type=date],select,textarea{border-radi
   border:1px solid var(--tBlB);border-radius:5px;padding:0 5px;margin-left:5px}
 
 /* テーマ切替 */
-.thm{width:34px;height:30px;border-radius:9px;border:1px solid var(--line);background:var(--surface);
-  color:var(--dim);font-size:14px;line-height:1;transition:color .15s,border-color .15s}
+.thm{display:grid;place-items:center;width:34px;height:32px;border-radius:9px;border:1px solid var(--line);
+  background:var(--surface);color:var(--dim);font-size:14px;line-height:1;transition:color .15s,border-color .15s}
 .thm:hover{color:var(--gold);border-color:var(--gold)}
+.thm.on{color:var(--gold);border-color:var(--gold);background:color-mix(in srgb,var(--gold) 12%,var(--surface))}
 
 /* 紙吹雪 */
 #conf{position:fixed;inset:0;pointer-events:none;z-index:95;overflow:hidden}
@@ -427,6 +439,8 @@ input[type=text],input[type=number],input[type=date],select,textarea{border-radi
       <span>未確保 <b id="hsUnsec" class="g">0.0h</b></span>
     </div>
     <span class="spacer"></span>
+    <button class="thm" id="btnGear" aria-label="設定" title="設定">
+      <svg viewBox="0 0 24 24" style="width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.9"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 14.5a1.7 1.7 0 00.3 1.9l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.7 1.7 0 00-2.9 1.2v.2a2 2 0 01-4 0v-.1a1.7 1.7 0 00-1.1-1.6 1.7 1.7 0 00-1.9.4l-.1.1a2 2 0 11-2.8-2.8l.1-.1a1.7 1.7 0 00-1.2-2.9H3a2 2 0 010-4h.1a1.7 1.7 0 001.6-1.1 1.7 1.7 0 00-.4-1.9l-.1-.1a2 2 0 112.8-2.8l.1.1a1.7 1.7 0 001.9.3h.1A1.7 1.7 0 0010 3.5V3a2 2 0 014 0v.1a1.7 1.7 0 001 1.6 1.7 1.7 0 001.9-.4l.1-.1a2 2 0 112.8 2.8l-.1.1a1.7 1.7 0 00-.3 1.9v.1a1.7 1.7 0 001.6 1H21a2 2 0 010 4h-.1a1.7 1.7 0 00-1.5 1z"/></svg></button>
     <button class="thm" id="btnTheme" aria-label="テーマ切替" title="明るい / 暗い">☾</button>
     <button class="capbtn" id="btnCapture" aria-label="受信箱に追加">＋ 追加 <kbd>⌘K</kbd></button>
   </div>
@@ -638,6 +652,7 @@ input[type=text],input[type=number],input[type=date],select,textarea{border-radi
       <button class="ghost" id="gPushM">今月ぶんを送る</button>
       <button class="ghost" id="gIcs">.ics で書き出す（設定不要）</button>
       <button class="ghost" id="gTrouble">うまくいかない時は</button>
+      <button class="ghost" id="gDisc">切断</button>
       <label class="sub" style="display:flex;gap:6px;align-items:center;white-space:nowrap;margin-left:4px">
         <input type="checkbox" id="gShow" style="width:auto"> 週・今日に予定を重ねて表示</label>
     </div>
@@ -1363,7 +1378,7 @@ function renderSet(){
   const cals=S.settings.gcals||[{id:'primary',summary:'メイン（primary）'}];
   gc.innerHTML=cals.map(c=>`<option value="${esc(c.id)}"${(S.settings.gcal||'primary')===c.id?' selected':''}>${esc(c.summary)}</option>`).join('');
   document.getElementById('gState').innerHTML=GCAL.token
-    ? '<span style="color:var(--ok);font-weight:700">接続中</span> ── このタブを閉じると切断されます'
+    ? `<span style="color:var(--ok);font-weight:700">接続中</span> ── ${new Date(GCAL.exp).toLocaleTimeString('ja-JP',{hour:'2-digit',minute:'2-digit'})} まで有効（切れたら再接続してください）`
     : (S.settings.gcid?'未接続（「接続する」を押してください）':'クライアントID 未設定 ──「セットアップ手順」から進めてください');
   renderDiag();
   if(typeof renderSetSync==='function')renderSetSync();
@@ -1378,6 +1393,7 @@ function go(p){
   ui.panel=p;
   document.querySelectorAll('.tab').forEach(t=>t.setAttribute('aria-selected',String(t.dataset.p===p)));
   document.querySelectorAll('.bn').forEach(t=>t.setAttribute('aria-selected',String(t.dataset.p===p)));
+  const gr=document.getElementById('btnGear'); if(gr)gr.classList.toggle('on',p==='set');
   ['today','inbox','week','month','bill','set'].forEach(x=>document.getElementById('p-'+x).hidden=(x!==p));
   window.scrollTo({top:0});renderAll();
   if(typeof maybeSync==='function'){
@@ -1641,6 +1657,7 @@ document.addEventListener('change',ev=>{
 const on=(id,fn,evt)=>document.getElementById(id).addEventListener(evt||'click',fn);
 document.querySelectorAll('.tab,.bn').forEach(b=>b.addEventListener('click',()=>go(b.dataset.p)));
 on('btnCapture',openCapture); on('btnCapture2',openCapture); on('fab',openCapture);
+on('btnGear',()=>go('set'));
 on('btnTheme',()=>{const t=(S.settings.theme==='dark'?'light':'dark');
   S.settings.theme=t;save();setTheme(t);renderAll();});
 document.addEventListener('keydown',e=>{
@@ -1740,7 +1757,8 @@ on('dFile',e=>{const f=e.target.files[0];if(!f)return;const r=new FileReader();
 on('dSeed',()=>{if(!confirm('現在のデータを消してサンプルを入れ直しますか？'))return;
   S=blank();seed();toast('サンプルを入れました','ok');renderAll();});
 on('dWipe',()=>{if(!confirm('本当に全部消しますか？ 元に戻せません'))return;
-  S=blank();save();toast('消しました');renderAll();});
+  try{localStorage.removeItem(TKEY);localStorage.removeItem('waku.v1.bak');}catch(_){}
+  GCAL.token=null;GCAL.exp=0;S=blank();save();toast('消しました');renderAll();});
 
 /* ═══════════════ init ═══════════════ */
 if('serviceWorker' in navigator && location.protocol==='https:')
@@ -1749,6 +1767,12 @@ if('serviceWorker' in navigator && location.protocol==='https:')
   if(location.protocol==='file:')document.getElementById('fileBanner').hidden=false;
   if(!load()){S=blank();seed();}
   setTheme(S.settings.theme||'light');
+  if(typeof loadTok==='function'&&loadTok()){
+    setTimeout(()=>{ maybeSync(weekDays(ui.day));
+      if(S.settings.autoSync&&typeof driveSync==='function')
+        driveSync().catch(e=>console.warn('startup sync:',e.message));
+      if(ui.panel==='set')renderSet(); },300);
+  }
   ui.month=ym(today());ui.day=today();ui.week=today();
   if(!S.gen[ui.month]&&S.tpls.length&&Object.keys(bud(ui.month)).length)generate(ui.month,true);
   go('today');
@@ -1871,6 +1895,17 @@ function exportICS(days,label){
 
 /* ═══════════════ Google カレンダー ═══════════════ */
 var GCAL={token:null,exp:0};
+const TKEY='waku.gtok';
+function saveTok(){try{
+  if(GCAL.token&&GCAL.exp>Date.now())localStorage.setItem(TKEY,JSON.stringify({t:GCAL.token,e:GCAL.exp}));
+  else localStorage.removeItem(TKEY);}catch(_){}}
+function loadTok(){try{
+  const o=JSON.parse(localStorage.getItem(TKEY)||'null');
+  if(o&&o.t&&o.e>Date.now()+120000){GCAL.token=o.t;GCAL.exp=o.e;return true;}
+  localStorage.removeItem(TKEY);}catch(_){}
+  return false;}
+function gDisconnect(){GCAL.token=null;GCAL.exp=0;saveTok();S.gcache=null;
+  renderSet();renderAll();toast('切断しました');}
 const TZ=()=>{try{return Intl.DateTimeFormat().resolvedOptions().timeZone||'Asia/Tokyo'}catch(_){return 'Asia/Tokyo'}};
 function gDT(date,min){const p=n=>String(n).padStart(2,'0');
   return `${date}T${p(Math.floor(min/60)%24)}:${p(min%60)}:00`;}
@@ -1888,7 +1923,7 @@ async function gAuth(force){
     const tc=google.accounts.oauth2.initTokenClient({client_id:cid,
       scope:'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.appdata',
       callback:r=>{if(r.error)return rej(new Error('認証に失敗しました: '+r.error));
-        GCAL.token=r.access_token;GCAL.exp=Date.now()+(Number(r.expires_in)||3600)*1000;
+        GCAL.token=r.access_token;GCAL.exp=Date.now()+(Number(r.expires_in)||3600)*1000;saveTok();
         renderSet&&ui.panel==='set'&&renderSet();res(GCAL.token);},
       error_callback:er=>{const ty=(er&&er.type)||'';
         rej(new Error(ty==='popup_closed'
@@ -1902,7 +1937,7 @@ async function gRaw(url,opt){
   o.headers=Object.assign({Authorization:'Bearer '+tk},o.headers||{});
   if(o.body&&!o.headers['Content-Type'])o.headers['Content-Type']='application/json';
   const r=await fetch(url,o);
-  if(r.status===401){GCAL.token=null;throw new Error('認証が切れました。もう一度「接続する」を押してください');}
+  if(r.status===401){GCAL.token=null;saveTok();throw new Error('認証が切れました。もう一度「接続する」を押してください');}
   if(!r.ok){const txt=await r.text();const err=new Error('Google API '+r.status+'：'+txt.slice(0,160));err.status=r.status;throw err;}
   return r;
 }
@@ -1911,7 +1946,7 @@ async function gFetch(path,opt){
   const o=Object.assign({},opt);
   o.headers=Object.assign({Authorization:'Bearer '+tk,'Content-Type':'application/json'},o.headers||{});
   const r=await fetch('https://www.googleapis.com/calendar/v3'+path,o);
-  if(r.status===401){GCAL.token=null;throw new Error('認証が切れました。もう一度「接続する」を押してください');}
+  if(r.status===401){GCAL.token=null;saveTok();throw new Error('認証が切れました。もう一度「接続する」を押してください');}
   if(!r.ok){const txt=await r.text();const err=new Error('Google API '+r.status+'：'+txt.slice(0,160));err.status=r.status;throw err;}
   return r.status===204?null:r.json();
 }
@@ -2258,6 +2293,7 @@ function gHint(msg){
   return '';
 }
 on('gWizard',gWizard);
+on('gDisc',gDisconnect);
 on('gTrouble',()=>{
   modal({title:'うまくいかない時は',
     body:`<div style="font-size:12.5px;color:var(--dim);margin-bottom:14px">
